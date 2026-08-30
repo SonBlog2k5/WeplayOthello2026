@@ -25,8 +25,51 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Fix Android project structure
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p app/src/main/java/com/weplay/othello
+          mkdir -p app/src/main/res/values
+
+          # Copy Kotlin source files from repository root
+          for f in BoardDetector.kt CaptureService.kt HintOverlay.kt MainActivity.kt Othello.kt; do
+            if [ -f "$f" ]; then
+              cp "$f" "app/src/main/java/com/weplay/othello/$f"
+            fi
+          done
+
+          # Copy AndroidManifest.xml
+          if [ -f "AndroidManifest.xml" ]; then
+            cp "AndroidManifest.xml" "app/src/main/AndroidManifest.xml"
+          fi
+
+          # Copy styles.xml
+          if [ -f "styles.xml" ]; then
+            cp "styles.xml" "app/src/main/res/values/styles.xml"
+          fi
+
+          # Update namespace
+          if [ -f "app/build.gradle.kts" ]; then
+            sed -i \
+              's/namespace = "com.example.weplayothello"/namespace = "com.weplay.othello"/' \
+              app/build.gradle.kts
+
+            # Update applicationId
+            sed -i \
+              's/applicationId = "com.example.weplayothello"/applicationId = "com.weplay.othello"/' \
+              app/build.gradle.kts
+          fi
+
+          echo "=== PROJECT FILES ==="
+          find app/src/main -type f | sort
+
+          echo "=== BUILD GRADLE ==="
+          cat app/build.gradle.kts
+
       - name: Build Debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
