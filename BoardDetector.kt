@@ -19,9 +19,9 @@ object BoardDetector {
         if (w < 300 || h < 300) return
 
         // Inner 8x8 playing area from the supplied WePlay layout.
-        val left = (w * 0.134f).toInt()
+        val left = (w * 0.30f).toInt()
         val top = (h * 0.365f).toInt()
-        val size = (w * 0.727f).toInt()
+        val size = (w * 0.58f).toInt()
         if (left + size > w || top + size > h) return
 
         val board = Array(8) { Array(8) { Disc.EMPTY } }
