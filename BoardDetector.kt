@@ -19,44 +19,28 @@ object BoardDetector {
 
         if (w < 300 || h < 300) return
 
-        /*
-         * WEPLAY PORTRAIT
-         *
-         * Bàn nằm khoảng:
-         * X = 33% -> 71%
-         * Y = 33% -> 67%
-         */
+        // Vùng bàn Othello WePlay theo màn hình dọc
         val left = (w * 0.33f).toInt()
-        val top = (h * 0.33f).toInt()
+        val top = (h * 0.35f).toInt()
         val boardW = (w * 0.38f).toInt()
-        val boardH = (h * 0.34f).toInt()
+        val boardH = (h * 0.32f).toInt()
 
         val plane = image.planes.firstOrNull() ?: return
         val buffer = plane.buffer
         val pixelStride = plane.pixelStride
         val rowStride = plane.rowStride
 
-        fun rgb(x: Int, y: Int): IntArray? {
+        fun brightness(x: Int, y: Int): Int {
 
-            if (x < 0 || x >= w || y < 0 || y >= h)
-                return null
+            if (x < 0 || y < 0 || x >= w || y >= h)
+                return 0
 
             val pos = y * rowStride + x * pixelStride
 
-            if (pos < 0 || pos + 3 >= buffer.limit())
-                return null
+            if (pos < 0 || pos >= buffer.limit())
+                return 0
 
-            val r = buffer.get(pos).toInt() and 255
-            val g = buffer.get(pos + 1).toInt() and 255
-            val b = buffer.get(pos + 2).toInt() and 255
-
-            return intArrayOf(r, g, b)
-        }
-
-        fun lum(p: IntArray): Double {
-            return 0.2126 * p[0] +
-                   0.7152 * p[1] +
-                   0.0722 * p[2]
+            return buffer.get(pos).toInt() and 255
         }
 
         val board = Array(8) {
@@ -66,12 +50,6 @@ object BoardDetector {
         var black = 0
         var white = 0
 
-        /*
-         * Đọc từng ô.
-         *
-         * Không dùng ngưỡng sáng tuyệt đối nữa,
-         * vì ô bàn màu sáng có thể bị nhầm thành quân trắng.
-         */
         for (r in 0..7) {
             for (c in 0..7) {
 
@@ -84,139 +62,86 @@ object BoardDetector {
                 val cy =
                     (top + (r + 0.5f) * cellH).toInt()
 
-                var centerSum = 0.0
-                var edgeSum = 0.0
-                var centerCount = 0
-                var edgeCount = 0
-
                 val radius =
-                    max(2, minOf(cellW, cellH).toInt() / 6)
+                    max(3, minOf(cellW, cellH).toInt() / 6)
 
-                // Trung tâm
+                var center = 0.0
+                var outside = 0.0
+                var n1 = 0
+                var n2 = 0
+
                 for (dy in -radius..radius) {
                     for (dx in -radius..radius) {
 
-                        val p = rgb(cx + dx, cy + dy)
-                            ?: continue
-
-                        centerSum += lum(p)
-                        centerCount++
+                        center += brightness(cx + dx, cy + dy)
+                        n1++
                     }
                 }
 
-                // Vành ngoài của ô
-                val outer = max(
-                    radius + 2,
-                    minOf(cellW, cellH).toInt() / 3
-                )
+                val outer = radius * 2
 
                 for (dy in -outer..outer) {
                     for (dx in -outer..outer) {
 
                         if (
-                            abs(dx) < radius ||
-                            abs(dy) < radius
+                            abs(dx) <= radius &&
+                            abs(dy) <= radius
                         ) continue
 
-                        val p = rgb(cx + dx, cy + dy)
-                            ?: continue
-
-                        edgeSum += lum(p)
-                        edgeCount++
+                        outside += brightness(cx + dx, cy + dy)
+                        n2++
                     }
                 }
 
-                if (centerCount == 0 || edgeCount == 0)
-                    continue
+                if (n1 == 0 || n2 == 0) continue
 
-                val center = centerSum / centerCount
-                val edge = edgeSum / edgeCount
+                center /= n1
+                outside /= n2
 
-                val difference = center - edge
+                val diff = center - outside
 
-                /*
-                 * Quân đen:
-                 * trung tâm tối hơn nền xung quanh.
-                 */
-                if (difference < -22) {
-
+                if (diff < -18) {
                     board[r][c] = Disc.BLACK
                     black++
-
-                /*
-                 * Quân trắng:
-                 * trung tâm sáng hơn nền xung quanh.
-                 */
-                } else if (difference > 22) {
-
+                } else if (diff > 18) {
                     board[r][c] = Disc.WHITE
                     white++
-
-                } else {
-
-                    board[r][c] = Disc.EMPTY
                 }
             }
         }
 
         val occupied = black + white
 
-        /*
-         * Không đủ quân => chưa bắt được bàn.
-         */
-        if (occupied < 4 || occupied > 64) {
-            overlay.update("đang nhận bàn…")
+        if (occupied < 4) {
+            overlay.update("Chưa nhận bàn")
             return
         }
 
-        /*
-         * Xác định bên đi dựa trên số quân đã xuất hiện.
-         */
-        val movesPlayed = occupied - 4
-
-        var side =
-            if (movesPlayed % 2 == 0)
+        val side =
+            if ((occupied - 4) % 2 == 0)
                 Disc.BLACK
             else
                 Disc.WHITE
 
-        var best =
-            Othello.best(board, side)
+        val best = Othello.best(board, side)
 
-        /*
-         * Nếu không có nước thì thử bên còn lại.
-         */
         if (best == null) {
-
-            side =
-                if (side == Disc.BLACK)
-                    Disc.WHITE
-                else
-                    Disc.BLACK
-
-            best =
-                Othello.best(board, side)
+            overlay.update("Không có nước")
+            return
         }
 
-        if (best != null) {
+        val x =
+            left +
+            ((best.col + 0.5f) * boardW / 8f).toInt()
 
-            val x =
-                left +
-                ((best.col + 0.5f) * boardW / 8f).toInt()
+        val y =
+            top +
+            ((best.row + 0.5f) * boardH / 8f).toInt()
 
-            val y =
-                top +
-                ((best.row + 0.5f) * boardH / 8f).toInt()
-
-            overlay.update(
-                "${best.text} +${best.flips}",
-                x,
-                y
-            )
-
-        } else {
-
-            overlay.update("không có nước")
-        }
+        overlay.update(
+            "${best.text} +${best.flips}",
+            x,
+            y
+        )
     }
 }
